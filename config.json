@@ -1,14 +1,17 @@
 {
   "queries": [
-    "CompTIA Security+ free exam voucher registration 2026",
-    "CompTIA Security+ SY0-701 \"100% discount\" voucher",
+    "CompTIA Security+ free exam voucher registration",
     "free Security+ certification voucher program apply",
     "Security+ free voucher scholarship cybersecurity apply",
     "free CompTIA exam voucher cybersecurity training program apply",
     "voucher gratuito CompTIA Security+ inscricao",
-    "bolsa gratuita certificacao CompTIA Security+ voucher",
-    "site:comptia.org free voucher Security+"
+    "site:comptia.org free voucher Security+",
+    "CompTIA Security+ exam voucher discount promo code",
+    "CompTIA store sale Security+ voucher % off",
+    "desconto voucher CompTIA Security+ promocao cupom"
   ],
+  "alert_promotions": true,
+  "min_discount_percent": 10,
   "search_depth": "basic",
   "chunks_per_source": 3,
   "max_results_per_query": 8,

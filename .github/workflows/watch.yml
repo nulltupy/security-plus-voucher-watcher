@@ -2,7 +2,7 @@ name: Security+ Voucher Watcher
 
 on:
   schedule:
-    # A cada 8 horas (UTC). 8 buscas x 3 execucoes/dia ~= 720 creditos/mes na Tavily.
+    # A cada 8 horas (UTC). 9 buscas x 3 execucoes/dia ~= 810 creditos/mes na Tavily.
     - cron: "17 */8 * * *"
   workflow_dispatch:
     inputs:

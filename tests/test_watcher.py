@@ -28,6 +28,58 @@ def test_partial_discount_is_rejected():
     assert not result.is_candidate
 
 
+def test_promotion_is_candidate_when_enabled():
+    text = (
+        "CompTIA Security+ SY0-701 exam voucher: 20% off with promo code SECURE20. "
+        "Offer ends December 31, 2026. Buy now."
+    )
+    result = w.evaluate_offer(text, NOW, allow_promotions=True, min_discount_percent=10)
+    assert result.is_candidate
+    assert result.offer_type == "promocao"
+    assert result.discount_percent == 20
+
+
+def test_portuguese_promotion_is_detected():
+    text = "Voucher CompTIA Security+ com 15% de desconto usando cupom. Válido até 30/12/2026."
+    result = w.evaluate_offer(text, NOW, allow_promotions=True, min_discount_percent=10)
+    assert result.is_candidate
+    assert result.offer_type == "promocao"
+    assert result.discount_percent == 15
+
+
+def test_small_discount_below_minimum_is_rejected():
+    text = "CompTIA Security+ exam voucher 5% off. Offer ends December 31, 2026. Buy now."
+    result = w.evaluate_offer(text, NOW, allow_promotions=True, min_discount_percent=10)
+    assert not result.is_candidate
+
+
+def test_expired_promotion_is_rejected():
+    text = "CompTIA Security+ voucher 25% off. Promotion ended. Offer ends March 31, 2025."
+    result = w.evaluate_offer(text, NOW, allow_promotions=True, min_discount_percent=10)
+    assert not result.is_candidate
+
+
+def test_free_voucher_still_labeled_free_with_promotions_enabled():
+    text = (
+        "Get a free CompTIA Security+ exam voucher (100% discount). "
+        "Registration closes January 30, 2027. Apply now."
+    )
+    result = w.evaluate_offer(text, NOW, allow_promotions=True)
+    assert result.is_candidate
+    assert result.offer_type == "gratuito"
+
+
+def test_offer_label():
+    promo = w.Candidate(
+        title="x", source_url="u", signup_url="u", confidence="alta", score=1, reasons=[],
+        warnings=[], evidence=[], excerpt="", future_dates=[], fingerprint="f",
+        offer_type="promocao", discount_percent=30,
+    )
+    assert w.offer_label(promo) == "Promoção (30% de desconto)"
+    promo.offer_type = "gratuito"
+    assert w.offer_label(promo) == "Gratuito (100%)"
+
+
 def test_expired_campaign_is_rejected():
     text = (
         "Free CompTIA Security+ exam voucher for participants. "

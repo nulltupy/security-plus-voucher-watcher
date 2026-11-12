@@ -81,6 +81,8 @@ class Evaluation:
     warnings: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     dates: list[DateSignal] = field(default_factory=list)
+    offer_type: str = ""  # "gratuito" (100%) or "promocao" (partial discount)
+    discount_percent: int = 0
 
 
 @dataclass(slots=True)
@@ -99,6 +101,16 @@ class Candidate:
     career_priority: str = ""
     matched_certifications: list[str] = field(default_factory=list)
     career_reason: str = ""
+    offer_type: str = "gratuito"
+    discount_percent: int = 0
+
+
+def offer_label(candidate: Candidate) -> str:
+    if candidate.offer_type == "promocao":
+        if candidate.discount_percent:
+            return f"Promoção ({candidate.discount_percent}% de desconto)"
+        return "Promoção (desconto em valor)"
+    return "Gratuito (100%)"
 
 
 class PageParser(HTMLParser):
@@ -430,9 +442,20 @@ SIGNUP_TERMS_RE = re.compile(
     r"cadastre-se|participe|claim voucher|obter voucher|garanta sua vaga)\b",
     re.IGNORECASE,
 )
-PARTIAL_DISCOUNT_RE = re.compile(
-    r"\b(?:[1-9]\d?|(?:1[0-9]{2}|[2-9]\d{2}))\s*%\s*(?:off|discount|desconto)\b",
+# "20% off", "15% de desconto", "save 10%", "desconto de 30%" (text is accent-folded).
+PERCENT_DISCOUNT_RE = re.compile(
+    r"\b(\d{1,3})\s*%\s*(?:off|discount|desconto|de desconto)\b"
+    r"|\b(?:save|economize|desconto de|discount of)\s*(?:up to\s*|ate\s*)?(\d{1,3})\s*%",
     re.IGNORECASE,
+)
+# "$50 off", "save $75", "R$ 200 de desconto".
+AMOUNT_OFF_RE = re.compile(
+    r"(?:\$|us\$|usd\s?|r\$\s?)\s*\d{1,3}(?:[.,]\d{2})?\s*(?:off|de desconto)\b"
+    r"|\bsave\s*(?:\$|us\$)\s*\d{1,3}",
+    re.IGNORECASE,
+)
+ACADEMIC_RE = re.compile(
+    r"\b(?:student|academic|estudante|academico|universitario)\b", re.IGNORECASE
 )
 EXPIRED_RE = re.compile(
     r"\b(?:expired|offer ended|promotion ended|registration closed|registrations? closed|"
@@ -655,7 +678,27 @@ def _evidence_excerpt(text: str, pattern: re.Pattern[str], width: int = 120) -> 
     return clean_space(text[start:end])
 
 
-def evaluate_offer(text: str, now: datetime | None = None, min_score: int = 8) -> Evaluation:
+def discount_percents(normalized: str) -> list[int]:
+    """Return partial discount percentages (1-99) found in folded text."""
+    values: list[int] = []
+    for match in PERCENT_DISCOUNT_RE.finditer(normalized):
+        raw = next((group for group in match.groups() if group), "")
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        if 0 < value < 100:
+            values.append(value)
+    return values
+
+
+def evaluate_offer(
+    text: str,
+    now: datetime | None = None,
+    min_score: int = 8,
+    allow_promotions: bool = False,
+    min_discount_percent: int = 10,
+) -> Evaluation:
     now = now or now_local()
     normalized = fold_text(text)
     score = 0
@@ -699,18 +742,37 @@ def evaluate_offer(text: str, now: datetime | None = None, min_score: int = 8) -
                 reasons.append(reason)
             evidence.append(excerpt)
 
+    percents = discount_percents(normalized)
+    amount_off = AMOUNT_OFF_RE.search(normalized)
+    discount_percent = max(percents) if percents else 0
+    has_promo = bool(
+        allow_promotions
+        and not has_strong_offer
+        and (discount_percent >= min_discount_percent or (amount_off and not percents))
+    )
+    if has_promo:
+        score += 5
+        if discount_percent:
+            reasons.append(f"promoção: {discount_percent}% de desconto")
+        else:
+            reasons.append("promoção: desconto em valor (" + clean_space(amount_off.group(0)) + ")")
+        excerpt = _evidence_excerpt(normalized, PERCENT_DISCOUNT_RE if percents else AMOUNT_OFF_RE)
+        if excerpt:
+            evidence.append(excerpt)
+        if ACADEMIC_RE.search(normalized):
+            warnings.append("pode ser desconto exclusivo para estudantes/instituições de ensino")
+    elif percents or amount_off:
+        score -= 10
+        found = [f"{value}%" for value in percents[:3]] or [clean_space(amount_off.group(0))]
+        warnings.append("a página menciona desconto parcial: " + ", ".join(found))
+
     if WEAK_OFFER_RE.search(normalized):
         score += 2
-        if not has_strong_offer:
+        if not has_strong_offer and not has_promo:
             warnings.append("há menção a voucher, mas o desconto integral não está totalmente claro")
 
-    partial_matches = [match.group(0) for match in PARTIAL_DISCOUNT_RE.finditer(normalized)]
-    partial_matches = [value for value in partial_matches if not re.search(r"100\s*%", value)]
-    if partial_matches:
-        score -= 10
-        warnings.append("a página também menciona desconto parcial: " + ", ".join(partial_matches[:3]))
-
-    if PAID_OFFER_RE.search(normalized):
+    # Store pages are expected for promotions; for free offers they signal a paid reseller.
+    if PAID_OFFER_RE.search(normalized) and not has_promo:
         score -= 15
         warnings.append("parece loja/revenda de voucher pago, não oferta gratuita")
 
@@ -719,7 +781,7 @@ def evaluate_offer(text: str, now: datetime | None = None, min_score: int = 8) -
         score -= 20
         warnings.append("a página contém indicação de campanha encerrada ou expirada")
 
-    if FREE_TRAINING_ONLY_RE.search(normalized) and not has_strong_offer:
+    if FREE_TRAINING_ONLY_RE.search(normalized) and not has_strong_offer and not has_promo:
         score -= 6
         warnings.append("parece divulgar treinamento gratuito, não necessariamente o exame")
     if NON_VOUCHER_RE.search(normalized):
@@ -781,8 +843,13 @@ def evaluate_offer(text: str, now: datetime | None = None, min_score: int = 8) -
         warnings.append("prazo detectado já passou: " + max(past_deadlines).isoformat())
 
     has_signup_signal = bool(SIGNUP_TERMS_RE.search(normalized))
+    # For a promo code, "valid until" is simply the offer deadline, not a closed sign-up.
     redemption_only = bool(
-        future_redemption and not future_registration and not future_event_dates and not has_signup_signal
+        future_redemption
+        and not future_registration
+        and not future_event_dates
+        and not has_signup_signal
+        and not has_promo
     )
     if redemption_only:
         score -= 12
@@ -794,15 +861,21 @@ def evaluate_offer(text: str, now: datetime | None = None, min_score: int = 8) -
     if not has_scope:
         score -= 12
         warnings.append("não foi possível confirmar relação direta com CompTIA Security+")
-    if not has_strong_offer:
+    if not has_strong_offer and not has_promo:
         score -= 5
     is_candidate = bool(
-        has_scope and has_strong_offer and not expired and not redemption_only and score >= min_score
+        has_scope
+        and (has_strong_offer or has_promo)
+        and not expired
+        and not redemption_only
+        and score >= min_score
     )
     return Evaluation(
         score=score,
         is_candidate=is_candidate,
         expired=expired,
+        offer_type="gratuito" if has_strong_offer else ("promocao" if has_promo else ""),
+        discount_percent=discount_percent if has_promo else 0,
         has_scope=has_scope,
         has_strong_offer=has_strong_offer,
         reasons=list(dict.fromkeys(reasons)),
@@ -870,7 +943,7 @@ def rank_signup_link(source_url: str, links: list[tuple[str, str]]) -> tuple[str
     best_score = 0
     positive = re.compile(
         r"(?:register|registration|sign[- ]?up|apply|enroll|enrol|inscrev|inscri[cç][aã]o|"
-        r"cadastre|particip|claim|redeem|voucher|garanta|reserve)",
+        r"cadastre|particip|claim|redeem|voucher|garanta|reserve|buy|shop|store|cart|comprar|loja)",
         re.IGNORECASE,
     )
     negative = re.compile(
@@ -895,7 +968,7 @@ def rank_signup_link(source_url: str, links: list[tuple[str, str]]) -> tuple[str
         score = 0
         if positive.search(folded):
             score += 8
-        if re.search(r"(?:register|inscrev|apply|enroll|claim|redeem)", fold_text(anchor_text)):
+        if re.search(r"(?:register|inscrev|apply|enroll|claim|redeem|buy|shop|comprar)", fold_text(anchor_text)):
             score += 5
         if urlsplit(candidate).netloc.endswith(preferred_hosts):
             score += 4
@@ -941,7 +1014,13 @@ def build_candidate(
     if STUDY_MATERIAL_RE.search(folded_title):
         LOGGER.info("Rejeitado [%s]: material de estudo/preparacao, nao voucher de exame", hit.title)
         return None
-    evaluation = evaluate_offer(combined, now, int(config.get("min_score", 8)))
+    evaluation = evaluate_offer(
+        combined,
+        now,
+        int(config.get("min_score", 8)),
+        allow_promotions=bool(config.get("alert_promotions", False)),
+        min_discount_percent=int(config.get("min_discount_percent", 10)),
+    )
     if not evaluation.is_candidate:
         LOGGER.info(
             "Rejeitado [%s]: score=%s expired=%s strong=%s scope=%s",
@@ -974,7 +1053,7 @@ def build_candidate(
     if signup_score >= 5:
         adjusted_score += 3
         reasons.append("link específico de inscrição identificado")
-    elif not SIGNUP_TERMS_RE.search(fold_text(combined)):
+    elif evaluation.offer_type != "promocao" and not SIGNUP_TERMS_RE.search(fold_text(combined)):
         LOGGER.info("Rejeitado [%s]: sem inscricao/resgate identificavel", hit.title)
         return None
     else:
@@ -1032,6 +1111,8 @@ def build_candidate(
     )
     fingerprint = hashlib.sha256(fingerprint_input.encode("utf-8")).hexdigest()
     return Candidate(
+        offer_type=evaluation.offer_type or "gratuito",
+        discount_percent=evaluation.discount_percent,
         title=hit.title,
         source_url=normalize_url(final_url or hit.url),
         signup_url=normalize_url(signup_url),
@@ -1132,6 +1213,7 @@ def update_state(state: dict[str, Any], candidates: list[Candidate], now: dateti
 def _candidate_plain(candidate: Candidate, index: int) -> str:
     lines = [
         f"{index}. {candidate.title}",
+        f"Tipo: {offer_label(candidate)}",
         f"Confiança: {candidate.confidence} | prioridade para sua carreira: {candidate.career_priority or 'n/a'} | score: {candidate.score}",
         "Certificacao(s): " + (", ".join(candidate.matched_certifications) or "voucher generico relevante"),
         "Motivos: " + "; ".join(candidate.reasons),
@@ -1155,7 +1237,7 @@ def render_plain(candidates: list[Candidate], now: datetime) -> str:
     header = (
         "Monitor de vouchers CompTIA Security+ — oportunidades relevantes\n"
         f"Verificação: {now.strftime('%d/%m/%Y %H:%M %Z')}\n\n"
-        "O filtro exige exame/voucher 100% gratuito, inscricao ativa e relacao com o CompTIA Security+. "
+        "O filtro busca voucher 100% gratuito ou promocao ativa do CompTIA Security+. "
         "Ainda assim, confirme elegibilidade, quantidade e prazo na página oficial.\n\n"
     )
     return header + "\n\n".join(_candidate_plain(item, i) for i, item in enumerate(candidates, 1))
@@ -1176,6 +1258,9 @@ def render_html(candidates: list[Candidate], now: datetime) -> str:
             ) + "</p>"
         cards.append(
             "<div style='border:1px solid #d0d7de;border-radius:10px;padding:18px;margin:16px 0;'>"
+            "<p style='margin:0 0 6px;font-weight:700;color:"
+            + ("#1a7f37" if candidate.offer_type == "gratuito" else "#9a6700")
+            + f"'>{html.escape(offer_label(candidate))}</p>"
             f"<h2 style='margin-top:0'>{html.escape(candidate.title)}</h2>"
             f"<p><strong>Confiança:</strong> {html.escape(candidate.confidence)} "
             f"&nbsp; <strong>Score:</strong> {candidate.score}</p>"
@@ -1192,9 +1277,9 @@ def render_html(candidates: list[Candidate], now: datetime) -> str:
     return (
         "<!doctype html><html><body style='font-family:Arial,sans-serif;line-height:1.45;"
         "max-width:760px;margin:auto;padding:20px'>"
-        "<h1>Novos vouchers gratuitos do CompTIA Security+</h1>"
+        "<h1>Novas ofertas do CompTIA Security+</h1>"
         f"<p>Verificação: {html.escape(now.strftime('%d/%m/%Y %H:%M %Z'))}</p>"
-        "<p>O filtro exige exame/voucher 100% gratuito, inscricao ativa e relacao com o CompTIA Security+. "
+        "<p>O filtro busca voucher 100% gratuito ou promocao ativa do CompTIA Security+. "
         "Confirme elegibilidade, disponibilidade e prazo antes de contar com o benefício.</p>"
         + "".join(cards)
         + "</body></html>"
@@ -1235,11 +1320,14 @@ def send_email(candidates: list[Candidate], now: datetime) -> bool:
     recipients = [item.strip() for item in os.getenv("ALERT_TO", "").split(",") if item.strip()]
     if not settings or not recipients:
         return False
-    subject = (
-        f"[Security+ Gratis] {len(candidates)} oportunidade"
-        + ("" if len(candidates) == 1 else "s")
-        + " com 100% de desconto"
-    )
+    free_count = sum(1 for item in candidates if item.offer_type != "promocao")
+    promo_count = len(candidates) - free_count
+    parts: list[str] = []
+    if free_count:
+        parts.append(f"{free_count} voucher{'' if free_count == 1 else 's'} gratuito{'' if free_count == 1 else 's'}")
+    if promo_count:
+        parts.append(f"{promo_count} promoç{'ão' if promo_count == 1 else 'ões'}")
+    subject = "[Security+] " + " e ".join(parts)
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = settings["sender"]
@@ -1278,7 +1366,7 @@ def send_telegram(candidates: list[Candidate], now: datetime) -> bool:
     for index, candidate in enumerate(candidates, 1):
         reason_text = "; ".join(candidate.reasons)
         text = (
-            f"<b>Voucher relevante novo ({index}/{len(candidates)})</b>\n"
+            f"<b>Security+: {html.escape(offer_label(candidate))} ({index}/{len(candidates)})</b>\n"
             f"<b>{html.escape(candidate.title)}</b>\n"
             f"Confiança: {html.escape(candidate.confidence)} | score: {candidate.score}\n"
             f"Motivos: {html.escape(reason_text)}\n"
@@ -1380,7 +1468,17 @@ def run(args: argparse.Namespace) -> int:
             candidates.append(candidate)
     candidates = unique_candidates(candidates)
     priority_rank = {"essencial": 4, "alta": 3, "media": 2, "baixa": 1}
-    candidates.sort(key=lambda item: (priority_rank.get(item.career_priority, 0), item.confidence == "alta", item.score), reverse=True)
+    # Free vouchers first, then promotions by highest discount.
+    candidates.sort(
+        key=lambda item: (
+            item.offer_type != "promocao",
+            item.discount_percent,
+            priority_rank.get(item.career_priority, 0),
+            item.confidence == "alta",
+            item.score,
+        ),
+        reverse=True,
+    )
     LOGGER.info("%s candidato(s) após validação", len(candidates))
 
     if args.dry_run:

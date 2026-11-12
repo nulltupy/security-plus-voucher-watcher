@@ -1,6 +1,11 @@
 # Security+ Voucher Watcher
 
-Agente em Python que procura na internet oportunidades de **voucher 100% gratuito para o exame CompTIA Security+** (SY0-701 / SY0-801). Ele descarta descontos parciais, lojas que vendem voucher, campanhas encerradas e cursos gratuitos que não incluem o exame. Só avisa sobre novidades, por:
+Agente em Python que procura na internet oportunidades para o exame **CompTIA Security+** (SY0-701 / SY0-801):
+
+- 🎁 **vouchers 100% gratuitos**;
+- 💸 **promoções** com desconto a partir de 10% (cupons, promoções da loja CompTIA, descontos em valor).
+
+Ele descarta lojas de revenda sem desconto, campanhas encerradas, cursos gratuitos que não incluem o exame e material de estudo. Os vouchers gratuitos aparecem primeiro no alerta, seguidos das promoções com maior desconto. Só avisa sobre novidades, por:
 
 - e-mail, usando Gmail ou SMTP genérico;
 - Telegram, opcionalmente;
@@ -12,13 +17,16 @@ Roda automaticamente no **GitHub Actions a cada 8 horas**, sem servidor próprio
 
 ## O que o agente faz
 
-1. Executa oito pesquisas em português e inglês pela API de busca Tavily.
+1. Executa nove pesquisas em português e inglês pela API de busca Tavily (seis de vouchers gratuitos e três de promoções).
 2. Lê os resultados e, quando possível, a página da campanha.
 3. Exige relação direta com o Security+: menção a `Security+`, `Sec+`, códigos como `SY0-701`, ou um voucher válido para qualquer exame CompTIA.
-4. Exige indicação forte de voucher/exame gratuito ou desconto de 100%.
+4. Classifica a oferta:
+   - **Gratuito**: indicação forte de voucher/exame gratuito ou desconto de 100%;
+   - **Promoção**: desconto percentual a partir de `min_discount_percent` (padrão 10%) ou desconto em valor (ex.: "$50 off").
 5. Penaliza ou rejeita:
-   - desconto parcial, como 10% ou 15%;
-   - lojas e revendas de voucher pago ("add to cart", "buy now");
+   - descontos abaixo do mínimo configurado;
+   - lojas e revendas de voucher sem desconto ("add to cart", "buy now");
+   - promoções de sites não oficiais cujo link de compra não leva a um domínio confiável (evita revendas duvidosas);
    - curso ou treinamento gratuito sem exame;
    - simulados, dumps e material de estudo;
    - fóruns, Reddit e redes sociais;
@@ -58,7 +66,7 @@ security-plus-voucher-watcher/
 1. Crie uma conta na [Tavily](https://tavily.com).
 2. Abra o painel de API Keys e copie a chave que começa com `tvly-`.
 
-O plano gratuito oferece 1.000 créditos por mês. Esta configuração usa 8 buscas a cada 8 horas, cerca de 720 créditos por mês.
+O plano gratuito oferece 1.000 créditos por mês. Esta configuração usa 9 buscas a cada 8 horas, cerca de 810 créditos por mês.
 
 ### 2. Preparar o Gmail
 
@@ -119,6 +127,13 @@ Em vez das variáveis `GMAIL_*`, use `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMT
 
 Edite `config.json` para mudar as pesquisas, os domínios confiáveis e o perfil de carreira. Cada consulta consome um crédito da Tavily por execução.
 
+- `alert_promotions`: `true` avisa também sobre promoções; `false` avisa só de vouchers gratuitos.
+- `min_discount_percent`: desconto mínimo para uma promoção gerar alerta (padrão `10`).
+
+### Enviar um e-mail de teste
+
+Na aba **Actions** → **Security+ Voucher Watcher** → **Run workflow**, marque **"Enviar so um e-mail/Telegram de teste"**. Isso confirma que os avisos chegam, sem gastar créditos de busca.
+
 Para mudar a frequência, altere o `cron` em `.github/workflows/watch.yml` (horário em UTC).
 
 ## Testes
@@ -128,7 +143,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Os testes cobrem: voucher gratuito ativo, desconto parcial, campanha expirada, outra certificação, revenda paga, curso sem voucher, voucher válido para qualquer exame CompTIA, detecção dos códigos SY0, limpeza de URL, bloqueio de fóruns e escolha do link de inscrição.
+Os testes cobrem: voucher gratuito ativo, promoções em inglês e português, desconto abaixo do mínimo, promoção expirada, desconto parcial com promoções desligadas, campanha expirada, outra certificação, revenda paga, curso sem voucher, voucher válido para qualquer exame CompTIA, detecção dos códigos SY0, limpeza de URL, bloqueio de fóruns e escolha do link de inscrição.
 
 ## Segurança
 
