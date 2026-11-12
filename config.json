@@ -1,0 +1,43 @@
+{
+  "queries": [
+    "CompTIA Security+ free exam voucher registration 2026",
+    "CompTIA Security+ SY0-701 \"100% discount\" voucher",
+    "free Security+ certification voucher program apply",
+    "Security+ free voucher scholarship cybersecurity apply",
+    "free CompTIA exam voucher cybersecurity training program apply",
+    "voucher gratuito CompTIA Security+ inscricao",
+    "bolsa gratuita certificacao CompTIA Security+ voucher",
+    "site:comptia.org free voucher Security+"
+  ],
+  "search_depth": "basic",
+  "chunks_per_source": 3,
+  "max_results_per_query": 8,
+  "time_range": "year",
+  "country": null,
+  "min_score": 8,
+  "high_confidence_score": 18,
+  "alert_cooldown_days": 7,
+  "stale_result_days": 365,
+  "trusted_domains": [
+    "comptia.org",
+    "partners.comptia.org",
+    "store.comptia.org",
+    "pearsonvue.com",
+    "perscholas.org",
+    "npower.org",
+    "wicys.org",
+    "cyberskills2work.org",
+    "onwardtoopportunity.org",
+    "meritamerica.org",
+    "yearup.org"
+  ],
+  "career_targets": [
+    {
+      "label": "CompTIA Security+ (SY0-701 / SY0-801)",
+      "priority": "essencial",
+      "weight": 12,
+      "reason": "base reconhecida no mercado para analistas de MSS/SOC e requisito comum em vagas de cyber",
+      "patterns": ["\\bsecurity\\s*(?:\\+|plus\\b)", "\\bsec\\s*\\+", "\\bsy0\\s*-\\s*\\d{3}\\b"]
+    }
+  ]
+}

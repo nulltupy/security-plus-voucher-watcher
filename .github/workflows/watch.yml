@@ -1,0 +1,61 @@
+name: Security+ Voucher Watcher
+
+on:
+  schedule:
+    # A cada 8 horas (UTC). 8 buscas x 3 execucoes/dia ~= 720 creditos/mes na Tavily.
+    - cron: "17 */8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: secplus-voucher-watcher
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    env:
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      ALERT_TO: ${{ secrets.ALERT_TO }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      WATCHER_TIMEZONE: America/Sao_Paulo
+      ALERT_COOLDOWN_DAYS: "7"
+
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Procurar vouchers Security+ e notificar
+        run: python secplus_voucher_watcher.py
+
+      - name: Salvar historico antirrepeticao
+        shell: bash
+        run: |
+          if git diff --quiet -- data/seen.json; then
+            echo "Nenhum estado novo para salvar."
+            exit 0
+          fi
+          git config user.name "secplus-voucher-watcher[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/seen.json
+          git commit -m "chore: update voucher alert state"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
