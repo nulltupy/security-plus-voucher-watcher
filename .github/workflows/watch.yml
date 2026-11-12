@@ -5,6 +5,11 @@ on:
     # A cada 8 horas (UTC). 8 buscas x 3 execucoes/dia ~= 720 creditos/mes na Tavily.
     - cron: "17 */8 * * *"
   workflow_dispatch:
+    inputs:
+      test_notification:
+        description: "Enviar so um e-mail/Telegram de teste (nao faz buscas)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -43,10 +48,16 @@ jobs:
       - name: Instalar dependencias
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      - name: Enviar notificacao de teste
+        if: ${{ inputs.test_notification }}
+        run: python secplus_voucher_watcher.py --test-notification
+
       - name: Procurar vouchers Security+ e notificar
+        if: ${{ !inputs.test_notification }}
         run: python secplus_voucher_watcher.py
 
       - name: Salvar historico antirrepeticao
+        if: ${{ !inputs.test_notification }}
         shell: bash
         run: |
           if git diff --quiet -- data/seen.json; then
